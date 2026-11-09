@@ -1,0 +1,62 @@
+name: release
+# Push a tag named <chart>-<version>, e.g. citrineos-ocpp-0.12.0, to publish
+# charts/<chart> to oci://ghcr.io/<owner>/charts/<chart>:<version>.
+on:
+  push:
+    tags:
+      - "*-[0-9]+.[0-9]+.[0-9]+*"
+permissions:
+  contents: read
+  packages: write     # push to ghcr.io with GITHUB_TOKEN
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.4
+      - name: Resolve chart and version from tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^(.+)-([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
+            echo "::error::tag $TAG is not <chart>-<version>"; exit 1
+          fi
+          chart="${BASH_REMATCH[1]}"; version="${BASH_REMATCH[2]}"
+          [ -f "charts/$chart/Chart.yaml" ] || { echo "::error::no chart at charts/$chart"; exit 1; }
+          chart_version=$(awk '/^version:/{print $2}' "charts/$chart/Chart.yaml" | tr -d "\"'")
+          if [ "$chart_version" != "$version" ]; then
+            echo "::error file=charts/$chart/Chart.yaml::tag says $version but Chart.yaml version is $chart_version"; exit 1
+          fi
+          echo "chart=$chart" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "registry=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> "$GITHUB_OUTPUT"
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Refuse to overwrite a published version
+        env:
+          CHART: ${{ steps.tag.outputs.chart }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          REGISTRY: ${{ steps.tag.outputs.registry }}
+        run: |
+          if helm show chart "$REGISTRY/$CHART" --version "$VERSION" >/dev/null 2>&1; then
+            echo "::error::$REGISTRY/$CHART:$VERSION already exists. Bump version in charts/$CHART/Chart.yaml."; exit 1
+          fi
+      - name: Package and push
+        env:
+          CHART: ${{ steps.tag.outputs.chart }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          REGISTRY: ${{ steps.tag.outputs.registry }}
+        run: |
+          # Chart.lock makes `helm dependency build` use added repos only. Add one line per new dependency repo.
+          helm repo add haproxytech https://haproxytech.github.io/helm-charts
+          helm dependency build "charts/$CHART"
+          helm lint "charts/$CHART"
+          helm package "charts/$CHART" --destination dist
+          helm push "dist/$CHART-$VERSION.tgz" "$REGISTRY"
+          echo "Pushed \`$REGISTRY/$CHART:$VERSION\` from ${GITHUB_SHA:0:12}" >> "$GITHUB_STEP_SUMMARY"

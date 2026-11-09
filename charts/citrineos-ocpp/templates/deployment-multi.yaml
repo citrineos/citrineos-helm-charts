@@ -1,0 +1,77 @@
+{{- range $deploymentName, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+{{- $canary := and $deployment.canary $deployment.canary.enabled }}
+---
+{{- if $canary }}
+# Progressive delivery via Argo Rollouts. Basic (traffic-router-less) canary:
+# each setWeight step is approximated by adjusting canary/stable replica counts,
+# so pods "swap over" gradually. Background analysis (startingStep) watches the
+# canary's own metrics continuously and aborts on regression; the trailing
+# analysis step is a hard gate that must pass before the final swap to 100%.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+{{- end }}
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app: {{ include "citrineos-ocpp.name" $ }}
+    component: {{ $deploymentName }}
+    {{- include "citrineos-ocpp.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ $deployment.replicaCount }}
+  # Honoured by both Deployment and Rollout.
+  progressDeadlineSeconds: {{ $deployment.progressDeadlineSeconds | default 300 }}
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-ocpp.name" $ }}
+      component: {{ $deploymentName }}
+      {{- include "citrineos-ocpp.selectorLabels" $ | nindent 6 }}
+  strategy:
+  {{- if $canary }}
+    canary:
+      maxSurge: {{ $deployment.canary.maxSurge | default 1 }}
+      maxUnavailable: {{ $deployment.canary.maxUnavailable | default 0 }}
+      {{- if and $deployment.canary.analysis $deployment.canary.analysis.metrics }}
+      # Background analysis: runs continuously from startingStep through promotion.
+      # canary-hash scopes every query to the NEW ReplicaSet's pods only.
+      analysis:
+        startingStep: {{ $deployment.canary.startingStep | default 1 }}
+        templates:
+          - templateName: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}-live
+        args:
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      {{- end }}
+      steps:
+        {{- range $step := $deployment.canary.steps }}
+        {{- if hasKey $step "weight" }}
+        - setWeight: {{ $step.weight }}
+        {{- end }}
+        {{- if hasKey $step "pause" }}
+        - pause: {{ if $step.pause }}{ duration: {{ $step.pause | quote }} }{{ else }}{}{{ end }}
+        {{- end }}
+        {{- end }}
+        {{- if and $deployment.canary.gate $deployment.canary.gate.metrics }}
+        # Hard gate before the final 100% swap.
+        - analysis:
+            templates:
+              - templateName: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}-gate
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        {{- end }}
+  {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
+{{ include "citrineos-ocpp.podTemplate" (dict "root" $ "deployment" $deployment "name" $deploymentName) }}
+{{- end }}
+{{- end }}

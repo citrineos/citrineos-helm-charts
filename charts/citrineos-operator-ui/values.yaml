@@ -1,0 +1,61 @@
+namespace: apps-citrineos-operator-ui
+replicaCount: 1
+image:
+  repository: ghcr.io/citrineos/citrineos-operator-ui
+  tag: "v2.1.0"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  ports:
+    rest:
+      port: 3000
+    prometheus:
+      port: 9464
+resources: {}
+env: {}
+envFromSecretKeys: []
+podSecurityContext: {}
+securityContext: {}
+serviceAccount:
+  create: true
+  annotations: {}
+serviceAccountName: ""
+rbac:
+  create: false
+  # A Role and RoleBinding granting the rules below are created in each of these.
+  namespaces:
+    - infra-rabbitmq
+    - infra-redis
+    - infra-keycloak
+    - infra-hasura
+  rules: []
+probes:
+  liveness:
+    enabled: false
+    path: /api/health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: false
+    path: /api/health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# Progressive delivery. When disabled a plain Deployment with a RollingUpdate
+# strategy is rendered; when enabled an Argo Rollouts Rollout (basic canary) is
+# rendered instead, which requires the argo-rollouts controller and its CRDs.
+rollout:
+  enabled: false
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  # Each entry may set `weight` (-> setWeight) and/or `pause` (-> pause; a
+  # duration like "5m", or "" to wait for a manual promote). Promotion to 100%
+  # is implicit after the last step.
+  steps:
+    - {weight: 50, pause: 5m}
+
+# Pod scheduling.
+nodeSelector: {}
+affinity: {}
+tolerations: []
+topologySpreadConstraints: []

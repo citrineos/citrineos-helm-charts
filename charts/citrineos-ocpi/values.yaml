@@ -1,0 +1,107 @@
+namespace: apps-citrineos-ocpi
+replicaCount: 1
+image:
+  repository: ghcr.io/citrineos/citrineos-ocpi
+  tag: "v2.1.0"
+  pullPolicy: Always
+service:
+  type: ClusterIP
+  ports:
+    rest:
+      port: 8085
+    prometheus:
+      port: 9464
+resources:
+  limits:
+    cpu: 300m # Increased for better performance
+    memory: 2Gi
+  requests:
+    cpu: 200m # Increased to match expected load
+    memory: 1Gi
+env: {}
+serviceAccount:
+  create: false
+  annotations: {}
+serviceAccountName: app-ocpi-sa
+rbac:
+  create: true
+  # A Role and RoleBinding granting the rules below are created in each of these.
+  namespaces:
+    - infra-rabbitmq
+    - infra-redis
+    - infra-keycloak
+    - infra-hasura
+  rules:
+    - apiGroups: [""]
+      resources: ["services", "endpoints"]
+      verbs: ["get", "list", "watch"]
+# Liveness and readiness probes
+probes:
+  # Holds off liveness checks until the app has started, e.g. while migrations run.
+  startup:
+    enabled: false
+    path: /ocpi/health
+    periodSeconds: 5
+    failureThreshold: 60
+    timeoutSeconds: 5
+  liveness:
+    enabled: true
+    path: /ocpi/health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /ocpi/health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# Progressive delivery (same switch as citrineos-operator-ui). When disabled a plain
+# Deployment with a RollingUpdate strategy is rendered; when enabled an Argo
+# Rollouts Rollout (basic canary) is rendered instead, which requires the
+# argo-rollouts controller and its CRDs.
+rollout:
+  enabled: false
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  # Each entry may set `weight` (-> setWeight) and/or `pause` (-> pause; a
+  # duration like "5m", or "" to wait for a manual promote). Promotion to 100%
+  # is implicit after the last step.
+  steps:
+    - {weight: 50, pause: 5m}
+  maxSurge: 1
+  maxUnavailable: 0
+  prometheusAddress: "http://prometheus-kube-prometheus-prometheus.infra-monitoring.svc.cluster.local:9090"
+  # Background checks: [{name, query, successCondition, interval, failureLimit}], queries scoped with rollouts_pod_template_hash="{{args.canary-hash}}".
+  analysis:
+    startingStep: 1
+    metrics: []
+  # One-shot checks before the final swap, same shape plus count.
+  gate:
+    metrics: []
+
+# Unset means the Kubernetes default of 30s.
+terminationGracePeriodSeconds:
+
+lifecycle:
+  # Seconds to keep serving after the pod is marked for removal, 0 to skip.
+  preStopSleepSeconds: 0
+
+pdb:
+  enabled: false
+  maxUnavailable: 1
+
+# Needs metrics-server in the cluster; replicaCount is ignored while this is on.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+# Secret-backed env vars: [{envName, secretName, secretKey}]. Never put credentials in env.
+envFromSecretKeys: []
+
+# Pod scheduling.
+nodeSelector: {}
+affinity: {}
+tolerations: []
+topologySpreadConstraints: []

@@ -1,0 +1,70 @@
+{{- /*
+Generates Argo Rollouts AnalysisTemplates from each deployment's canary config:
+  - "<name>-live": background analysis, runs continuously during the rollout.
+  - "<name>-gate": one-shot analysis, the hard gate before the final swap.
+
+Every metric query is passed through verbatim (no Helm tpl), so the literal
+{{args.canary-hash}} token survives into the manifest for Argo to substitute at
+analysis time. Scope every query with rollouts_pod_template_hash="{{args.canary-hash}}"
+so it measures ONLY the canary ReplicaSet's pods, not the blended service pool.
+*/ -}}
+{{- $prom := .Values.canaryDefaults.prometheusAddress -}}
+{{- range $deploymentName, $deployment := .Values.deployments }}
+{{- if and $deployment.enabled $deployment.canary $deployment.canary.enabled }}
+{{- if and $deployment.canary.analysis $deployment.canary.analysis.metrics }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}-live
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    component: {{ $deploymentName }}
+    {{- include "citrineos-ocpp.labels" $ | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    {{- range $m := $deployment.canary.analysis.metrics }}
+    - name: {{ $m.name }}
+      interval: {{ $m.interval | default "1m" }}
+      failureLimit: {{ $m.failureLimit | default 3 }}
+      inconclusiveLimit: {{ $m.inconclusiveLimit | default 3 }}
+      successCondition: {{ $m.successCondition | quote }}
+      provider:
+        prometheus:
+          address: {{ $prom | quote }}
+          query: |
+            {{- $m.query | nindent 12 }}
+    {{- end }}
+{{- end }}
+{{- if and $deployment.canary.gate $deployment.canary.gate.metrics }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}-gate
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    component: {{ $deploymentName }}
+    {{- include "citrineos-ocpp.labels" $ | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    {{- range $m := $deployment.canary.gate.metrics }}
+    - name: {{ $m.name }}
+      # One-shot gate: evaluate `count` times then decide.
+      count: {{ $m.count | default 3 }}
+      interval: {{ $m.interval | default "1m" }}
+      failureLimit: {{ $m.failureLimit | default 0 }}
+      successCondition: {{ $m.successCondition | quote }}
+      provider:
+        prometheus:
+          address: {{ $prom | quote }}
+          query: |
+            {{- $m.query | nindent 12 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

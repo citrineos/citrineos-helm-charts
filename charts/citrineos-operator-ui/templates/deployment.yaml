@@ -1,0 +1,115 @@
+{{- $rollout := .Values.rollout.enabled }}
+{{- if $rollout }}
+# Progressive delivery via Argo Rollouts. Basic (traffic-router-less) canary:
+# the Service selector is left untouched, so canary and stable pods both sit
+# behind it. Each setWeight step is approximated by replica counts; a pause 
+# step is a bake window during which the rollout can be aborted, after which
+# it auto-promotes.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+{{- end }}
+metadata:
+  name: {{ include "citrineos-operator-ui.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ include "citrineos-operator-ui.name" . }}
+    {{- include "citrineos-operator-ui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-operator-ui.name" . }}
+      {{- include "citrineos-operator-ui.selectorLabels" . | nindent 6 }}
+  # Honoured by both Deployment and Rollout.
+  progressDeadlineSeconds: {{ .Values.rollout.progressDeadlineSeconds | default 600 }}
+  # Old ReplicaSets kept as rollback targets (Rollout revisions / Deployment history).
+  revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit | default 10 }}
+  strategy:
+  {{- if $rollout }}
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      steps:
+        {{- range $step := .Values.rollout.steps }}
+        {{- if hasKey $step "weight" }}
+        - setWeight: {{ $step.weight }}
+        {{- end }}
+        {{- if hasKey $step "pause" }}
+        - pause: {{ if $step.pause }}{ duration: {{ $step.pause | quote }} }{{ else }}{}{{ end }}
+        {{- end }}
+        {{- end }}
+  {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "citrineos-operator-ui.name" . }}
+        {{- include "citrineos-operator-ui.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "citrineos-operator-ui.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ include "citrineos-operator-ui.name" . }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: rest
+              containerPort: {{ .Values.service.ports.rest.port }}
+            - name: prometheus
+              containerPort: {{ .Values.service.ports.prometheus.port }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range .Values.envFromSecretKeys }}
+            - name: {{ .envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: rest
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: rest
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

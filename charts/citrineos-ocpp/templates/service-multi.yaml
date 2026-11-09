@@ -1,0 +1,54 @@
+{{- range $deploymentName, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app: {{ include "citrineos-ocpp.name" $ }}
+    component: {{ $deploymentName }}
+  {{- with $deployment.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $deployment.service.type }}
+  selector:
+    app: {{ include "citrineos-ocpp.name" $ }}
+    component: {{ $deploymentName }}
+  ports:
+    - name: rest
+      port: {{ $deployment.service.ports.rest }}
+      targetPort: rest
+    {{- if $deployment.service.ports.websocket1 }}
+    - name: websocket1
+      port: {{ $deployment.service.ports.websocket1 }}
+      targetPort: websocket1
+    {{- end }}
+    {{- if $deployment.service.ports.websocket2 }}
+    - name: websocket2
+      port: {{ $deployment.service.ports.websocket2 }}
+      targetPort: websocket2
+    {{- end }}
+    {{- if $deployment.service.ports.websocket3 }}
+    - name: websocket3
+      port: {{ $deployment.service.ports.websocket3 }}
+      targetPort: websocket3
+    {{- end }}
+    {{- if $deployment.service.ports.websocket4 }}
+    - name: websocket4
+      port: {{ $deployment.service.ports.websocket4 }}
+      targetPort: websocket4
+    {{- end }}
+    {{- if $deployment.service.ports.websocket5 }}
+    - name: websocket5
+      port: {{ $deployment.service.ports.websocket5 }}
+      targetPort: websocket5
+    {{- end }}
+    - name: prometheus
+      port: {{ $deployment.service.ports.prometheus }}
+      targetPort: prometheus
+{{- end }}
+{{- end }}

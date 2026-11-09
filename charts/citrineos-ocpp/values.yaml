@@ -1,0 +1,90 @@
+global:
+  image:
+    repository: ghcr.io/citrineos/citrineos-server
+    tag: "v2.1.0"
+    pullPolicy: Always
+
+  namespace: apps-citrineos-ocpp
+
+  # Chart defaults only. A release's own sharedEnv values merge over these.
+  sharedEnv:
+    CITRINEOS_LOGLEVEL: 2 # Set to 2 (debug) for initial debugging, then 3 (info) for prod
+    DEPLOYMENT_TARGET: "cloud"
+
+serviceAccount:
+  create: true
+serviceAccountName: app-sa
+rbac:
+  create: true
+  # A Role and RoleBinding granting the rules below are created in each of these.
+  namespaces:
+    - infra-rabbitmq
+    - infra-redis
+    - infra-keycloak
+    - infra-monitoring
+  rules:
+    - apiGroups: [""]
+      resources: ["services", "endpoints"]
+      verbs: ["get", "list", "watch"]
+
+# Pod scheduling.
+nodeSelector: {}
+affinity: {}
+tolerations: []
+topologySpreadConstraints: []
+
+headlessService:
+  enabled: false
+  name: citrineos-ws-headless
+  component: "" # required when enabled is true
+
+# Shared settings for the Argo Rollouts canary analysis (see deployments.*.canary).
+# Only consumed when at least one deployment sets canary.enabled=true.
+canaryDefaults:
+  prometheusAddress: "http://prometheus-kube-prometheus-prometheus.infra-monitoring.svc.cluster.local:9090"
+
+deployments:
+  # ---------------------------------------------------------------------------
+  # Monolith
+  # ---------------------------------------------------------------------------
+  router:
+    enabled: true
+    replicaCount: 1
+    haproxyCompatible: true # Creates service with standard name for HAProxy
+
+    env: {}
+
+    service:
+      type: ClusterIP
+      ports:
+        rest: 8080
+        prometheus: 9464
+
+    resources: {}
+
+    extraVolumes: []
+    extraVolumeMounts: []
+
+    progressDeadlineSeconds: 300
+
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+
+    # Progressive delivery. When disabled a plain Deployment with a RollingUpdate
+    # strategy is rendered; when enabled an Argo Rollouts Rollout is rendered
+    # instead, which requires the argo-rollouts controller and its CRDs.
+    canary:
+      enabled: false
+
+    probes:
+      liveness:
+        enabled: true
+        path: /health
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        enabled: true
+        path: /health
+        initialDelaySeconds: 20
+        periodSeconds: 5

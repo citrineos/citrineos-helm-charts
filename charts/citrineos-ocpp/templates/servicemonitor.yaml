@@ -1,0 +1,30 @@
+{{- range $deploymentName, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-ocpp.name" $ }}
+      component: {{ $deploymentName }}
+  endpoints:
+    - port: prometheus
+      path: /metrics
+      interval: 30s
+      relabelings:
+        - targetLabel: deployment
+          replacement: {{ $deploymentName }}
+        # Required by canary analysis: scopes queries to one ReplicaSet's pods.
+        - sourceLabels: [__meta_kubernetes_pod_label_rollouts_pod_template_hash]
+          targetLabel: rollouts_pod_template_hash
+  namespaceSelector:
+    matchNames:
+      - {{ $.Values.global.namespace }}
+{{- end }}
+{{- end }}

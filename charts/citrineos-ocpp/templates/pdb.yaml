@@ -1,0 +1,24 @@
+{{- range $deploymentName, $deployment := .Values.deployments }}
+{{- if and $deployment.enabled $deployment.pdb $deployment.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "citrineos-ocpp.fullname" $ }}-{{ $deploymentName }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app: {{ include "citrineos-ocpp.name" $ }}
+    component: {{ $deploymentName }}
+    {{- include "citrineos-ocpp.labels" $ | nindent 4 }}
+spec:
+  {{- if $deployment.pdb.minAvailable }}
+  minAvailable: {{ $deployment.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $deployment.pdb.maxUnavailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-ocpp.name" $ }}
+      component: {{ $deploymentName }}
+{{- end }}
+{{- end }}

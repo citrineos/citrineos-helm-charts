@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: citrineos-ocpi
+  namespace: {{ .Values.namespace }}
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-ocpi.name" . }}
+  endpoints:
+    - port: prometheus
+      path: /metrics
+      interval: 30s
+      relabelings:
+        # Lets canary analysis tell the new ReplicaSet's pods from the old ones.
+        - sourceLabels: [__meta_kubernetes_pod_label_rollouts_pod_template_hash]
+          targetLabel: rollouts_pod_template_hash
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}

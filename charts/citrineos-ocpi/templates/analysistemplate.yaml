@@ -1,0 +1,56 @@
+{{- /* Queries are passed through as-is so Argo can fill in {{args.canary-hash}} itself. */ -}}
+{{- if .Values.rollout.enabled }}
+{{- $prom := .Values.rollout.prometheusAddress }}
+{{- if .Values.rollout.analysis.metrics }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "citrineos-ocpi.fullname" . }}-live
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "citrineos-ocpi.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    {{- range $m := .Values.rollout.analysis.metrics }}
+    - name: {{ $m.name }}
+      interval: {{ $m.interval | default "1m" }}
+      failureLimit: {{ $m.failureLimit | default 3 }}
+      inconclusiveLimit: {{ $m.inconclusiveLimit | default 3 }}
+      successCondition: {{ $m.successCondition | quote }}
+      provider:
+        prometheus:
+          address: {{ $prom | quote }}
+          query: |
+            {{- $m.query | nindent 12 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.rollout.gate.metrics }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "citrineos-ocpi.fullname" . }}-gate
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "citrineos-ocpi.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    {{- range $m := .Values.rollout.gate.metrics }}
+    - name: {{ $m.name }}
+      count: {{ $m.count | default 3 }}
+      interval: {{ $m.interval | default "1m" }}
+      failureLimit: {{ $m.failureLimit | default 0 }}
+      successCondition: {{ $m.successCondition | quote }}
+      provider:
+        prometheus:
+          address: {{ $prom | quote }}
+          query: |
+            {{- $m.query | nindent 12 }}
+    {{- end }}
+{{- end }}
+{{- end }}

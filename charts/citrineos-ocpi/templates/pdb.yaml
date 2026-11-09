@@ -1,0 +1,20 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "citrineos-ocpi.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ include "citrineos-ocpi.name" . }}
+    {{- include "citrineos-ocpi.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.pdb.minAvailable }}
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ include "citrineos-ocpi.name" . }}
+      {{- include "citrineos-ocpi.selectorLabels" . | nindent 6 }}
+{{- end }}
